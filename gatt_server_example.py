@@ -13,6 +13,11 @@ import advertising
 import gatt_server
 import argparse
 
+import rospy
+from std_msgs.msg import String
+from multiprocessing import Process
+import cPickle
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -28,5 +33,39 @@ def main():
     gatt_server.gatt_server_main(mainloop, bus, adapter_name)
     mainloop.run()
 
+def listener():
+
+    # In ROS, nodes are uniquely named. If two nodes with the same
+    # name are launched, the previous one is kicked off. The
+    # anonymous=True flag means that rospy will choose a unique
+    # name for our 'listener' node so that multiple listeners can
+    # run simultaneously.
+    rospy.init_node('listener', anonymous=True)
+
+    #rospy.Subscriber("/seva_events", String, executeSevaEvent)
+    rospy.Subscriber("/my_topic", String, executeSevaEvent)
+    # spin() simply keeps python from exiting until this node is stopped
+    rospy.spin()
+
+def executeSevaEvent(data):
+    event = data.data
+    rospy.loginfo(rospy.get_caller_id() + "Seva Event Executor: %s", event)
+    rospy.loginfo(event+" triggered.")
+    file = open('SevaEvent.dat', 'wb')
+    cPickle.dump(event, file, protocol = -1)
+    file.close()
+
+class movement(object):
+    def __init__(self):
+	self.move = 0
+
+
 if __name__ == '__main__':
-    main()
+    m = movement()
+    p1 = Process(target = main)
+    p1.start()
+    p2 = Process(target = listener)
+    p2.start()
+    p1.join()
+    p2.join()
+

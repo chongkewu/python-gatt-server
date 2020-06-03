@@ -17,6 +17,18 @@ from random import randint
 
 import exceptions
 import adapters
+import cPickle
+import os
+from collections import defaultdict
+mds_dict_re = {
+    'Nothing': 0,
+    'Walking': 1,
+    'Swing': 2,
+    'Sitting': 3,
+    #'falling': 4,
+    #'Laying': 5
+}
+mds_dict_re = defaultdict(int, mds_dict_re)
 
 BLUEZ_SERVICE_NAME = 'org.bluez'
 LE_ADVERTISING_MANAGER_IFACE = 'org.bluez.LEAdvertisingManager1'
@@ -31,8 +43,6 @@ GATT_SERVICE_IFACE = 'org.bluez.GattService1'
 GATT_CHRC_IFACE =    'org.bluez.GattCharacteristic1'
 GATT_DESC_IFACE =    'org.bluez.GattDescriptor1'
 
-
-
 class Application(dbus.service.Object):
     """
     org.bluez.GattApplication1 interface implementation
@@ -41,9 +51,10 @@ class Application(dbus.service.Object):
         self.path = '/'
         self.services = []
         dbus.service.Object.__init__(self, bus, self.path)
-        self.add_service(HeartRateService(bus, 0))
-        self.add_service(BatteryService(bus, 1))
-        self.add_service(TestService(bus, 2))
+        #self.add_service(HeartRateService(bus, 0))
+        #self.add_service(BatteryService(bus, 1))
+        #self.add_service(TestService(bus, 2))
+	self.add_service(TestService(bus, 0))
 
     def get_path(self):
         return dbus.ObjectPath(self.path)
@@ -432,8 +443,8 @@ class TestService(Service):
     def __init__(self, bus, index):
         Service.__init__(self, bus, index, self.TEST_SVC_UUID, True)
         self.add_characteristic(TestCharacteristic(bus, 0, self))
-        self.add_characteristic(TestEncryptCharacteristic(bus, 1, self))
-        self.add_characteristic(TestSecureCharacteristic(bus, 2, self))
+        #self.add_characteristic(TestEncryptCharacteristic(bus, 1, self))
+        #self.add_characteristic(TestSecureCharacteristic(bus, 2, self))
 
 class TestCharacteristic(Characteristic):
     """
@@ -447,12 +458,16 @@ class TestCharacteristic(Characteristic):
         Characteristic.__init__(
                 self, bus, index,
                 self.TEST_CHRC_UUID,
-                ['read', 'write', 'writable-auxiliaries'],
+                ['read', 'write', 'writable-auxiliaries', 'notify'],
                 service)
         self.value = []
         self.add_descriptor(TestDescriptor(bus, 0, self))
         self.add_descriptor(
                 CharacteristicUserDescriptionDescriptor(bus, 1, self))
+	self.notifying = False
+        self.action = 0
+	self.last_action = -1
+        GObject.timeout_add(200, self.update_move)
 
     def ReadValue(self, options):
         print('TestCharacteristic Read: ' + repr(self.value))
@@ -461,6 +476,44 @@ class TestCharacteristic(Characteristic):
     def WriteValue(self, value, options):
         print('TestCharacteristic Write: ' + repr(value))
         self.value = value
+
+    def notify_move(self):
+        if not self.notifying:
+            return
+	if self.last_action == self.action:
+	    return
+        self.PropertiesChanged(
+                GATT_CHRC_IFACE,
+                {'Value': [dbus.Byte(self.action)] }, [])
+	self.last_action = self.action
+
+    def update_move(self):
+	if not os.path.exists('SevaEvent.dat'):
+            file = open('SevaEvent.dat', 'wb')
+            cPickle.dump("initialize", file, protocol = -1)
+	    file.close()
+	file = open('SevaEvent.dat', 'rb')
+        SevaEvent = cPickle.load(file)
+	file.close()
+	self.action = mds_dict_re[SevaEvent]
+	print('Test index: {} SevaEvent: {}'.format(repr(self.action),repr(SevaEvent)))
+        self.notify_move()
+        return True
+
+    def StartNotify(self):
+        if self.notifying:
+            print('Already notifying, nothing to do')
+            return
+
+        self.notifying = True
+        self.notify_move()
+
+    def StopNotify(self):
+        if not self.notifying:
+            print('Not notifying, nothing to do')
+            return
+
+        self.notifying = False
 
 
 class TestDescriptor(Descriptor):
@@ -492,7 +545,8 @@ class CharacteristicUserDescriptionDescriptor(Descriptor):
 
     def __init__(self, bus, index, characteristic):
         self.writable = 'writable-auxiliaries' in characteristic.flags
-        self.value = array.array('B', b'This is a characteristic for testing')
+        #self.value = array.array('B', b'This is a characteristic for testing')
+	self.value = array.array('B', b'Notifing movement info')
         self.value = self.value.tolist()
         Descriptor.__init__(
                 self, bus, index,
@@ -617,7 +671,7 @@ def gatt_server_main(mainloop, bus, adapter_name):
     service_manager = dbus.Interface(
             bus.get_object(BLUEZ_SERVICE_NAME, adapter),
             GATT_MANAGER_IFACE)
-
+    
     app = Application(bus)
 
     print('Registering GATT application...')
@@ -625,4 +679,5 @@ def gatt_server_main(mainloop, bus, adapter_name):
     service_manager.RegisterApplication(app.get_path(), {},
                                     reply_handler=register_app_cb,
                                     error_handler=functools.partial(register_app_error_cb, mainloop))
+
 
