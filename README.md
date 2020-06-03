@@ -58,5 +58,12 @@ You can use a smartphone as a GATT client. I used the [GATT-IP](http://www.gatt-
 
 ![](http://jumper-public.s3-website.eu-central-1.amazonaws.com/gatt-ip.gif)
 
+## Usage of Seva event
+- terminal 1: roscore
+- terminal 2: python gatt_server_example.py
+    - Start two process (ros and ble)
+    - Use cPickle for sharing global variables.
+    - terminal 3: rostopic pub my_topic std_msgs/String "hey"
+
 ## License
 The code in this repository is based on code taken from the [BlueZ](http://www.bluez.org/) project. It is licensed under GPL 2.0
